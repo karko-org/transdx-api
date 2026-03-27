@@ -1,0 +1,273 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// 1. Operations Layer
+// ============================================================
+
+model Workshop {
+  id         Int      @id @default(autoincrement())
+  name       String   @db.VarChar(100)
+  address    String?  @db.VarChar(200)
+  phone      String?  @db.VarChar(20)
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("workshops")
+  
+  users User[]
+  cases Case[]
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  workshop_id   Int
+  login_id      String   @unique @db.VarChar(50)
+  password_hash String   @db.VarChar(200)
+  name          String   @db.VarChar(50)
+  role          String   @default("counselor") @db.VarChar(20) // admin | manager | counselor
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  workshop Workshop @relation(fields: [workshop_id], references: [id])
+
+  @@map("users")
+  cases Case[]
+}
+
+model Vehicle {
+  id              Int      @id @default(autoincrement())
+  plate_number    String   @unique @db.VarChar(20)
+  customer_name   String?  @db.VarChar(50)
+  customer_phone  String?  @db.VarChar(20)
+  manufacturer    String?  @db.VarChar(50)
+  model           String?  @db.VarChar(50)
+  year            Int?
+  transmission    String?  @db.VarChar(50)
+  memo            String?  @db.Text
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  @@map("vehicles")
+  
+  cases Case[]
+}
+
+// ============================================================
+// 2. Diagnostic Master Layer
+// ============================================================
+
+model FailureType {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100)
+  category    String?  @db.VarChar(50)
+  description String?  @db.Text
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("failure_types")
+
+  diagnosis_rules DiagnosisRule[]
+  repair_estimate_items RepairEstimateItem[]
+}
+
+model Symptom {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(100)
+  category    String?  @db.VarChar(50)
+  description String?  @db.Text
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("symptoms")
+
+  symptom_questions SymptomQuestion[]
+  diagnosis_rules DiagnosisRule[]
+  case_symptoms CaseSymptom[]
+}
+
+model Question {
+  id          Int      @id @default(autoincrement())
+  text        String   @db.VarChar(300)
+  description String?  @db.Text
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  @@map("questions")
+
+  symptom_questions SymptomQuestion[]
+  diagnosis_rules DiagnosisRule[]
+  case_question_answers CaseQuestionAnswer[]
+}
+
+model SymptomQuestion {
+  id          Int @id @default(autoincrement())
+  symptom_id  Int
+  question_id Int
+
+  symptom  Symptom  @relation(fields: [symptom_id], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [question_id], references: [id], onDelete: Cascade)
+
+  @@unique([symptom_id, question_id])
+  @@map("symptom_questions")
+}
+
+model DiagnosisRule {
+  id              Int     @id @default(autoincrement())
+  failure_type_id Int
+  rule_type       String  @db.VarChar(20)  // SYMPTOM | QUESTION
+  symptom_id      Int?
+  question_id     Int?
+  expected_answer String? @db.VarChar(10)  // "true" | "false"
+  score_delta     Float   @default(0)
+  is_active       Boolean @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  failure_type FailureType @relation(fields: [failure_type_id], references: [id])
+  symptom      Symptom?    @relation(fields: [symptom_id], references: [id])
+  question     Question?   @relation(fields: [question_id], references: [id])
+
+  @@map("diagnosis_rules")
+}
+
+model RepairEstimateItem {
+  id              Int     @id @default(autoincrement())
+  failure_type_id Int
+  item_name       String  @db.VarChar(100)
+  item_type       String  @default("part") @db.VarChar(20) // part | labor
+  unit_price      Int     @default(0)
+  quantity        Int     @default(1)
+  description     String? @db.Text
+  is_active       Boolean @default(true)
+  created_at      DateTime @default(now())
+  updated_at      DateTime @updatedAt
+
+  failure_type FailureType @relation(fields: [failure_type_id], references: [id])
+
+  @@map("repair_estimate_items")
+}
+
+// ============================================================
+// 3. Runtime Layer
+// ============================================================
+
+model Case {
+  id           Int      @id @default(autoincrement())
+  workshop_id  Int
+  user_id      Int
+  vehicle_id   Int
+  status       String   @default("draft") @db.VarChar(20) // draft → diagnosed → quoted → completed
+  created_at   DateTime @default(now())
+  updated_at   DateTime @updatedAt
+
+  workshop Workshop @relation(fields: [workshop_id], references: [id])
+  user     User     @relation(fields: [user_id], references: [id])
+  vehicle  Vehicle  @relation(fields: [vehicle_id], references: [id])
+
+  @@map("cases")
+
+  case_symptoms         CaseSymptom[]
+  case_question_answers CaseQuestionAnswer[]
+  diagnosis_runs DiagnosisRun[]
+  quotes Quote[]
+  snapshots Snapshot[]
+}
+
+model CaseSymptom {
+  id         Int @id @default(autoincrement())
+  case_id    Int
+  symptom_id Int
+
+  case_rel Case    @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  symptom  Symptom @relation(fields: [symptom_id], references: [id])
+
+  @@unique([case_id, symptom_id])
+  @@map("case_symptoms")
+}
+
+model CaseQuestionAnswer {
+  id          Int    @id @default(autoincrement())
+  case_id     Int
+  question_id Int
+  answer      Boolean
+
+  case_rel Case     @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [question_id], references: [id])
+
+  @@unique([case_id, question_id])
+  @@map("case_question_answers")
+}
+
+model DiagnosisRun {
+  id                       Int      @id @default(autoincrement())
+  case_id                  Int
+  run_version              Int      @default(1)
+  selected_failure_type_id Int?
+  // results 예시:
+  // [
+  //   { "failure_type_id": 1, "name": "토크컨버터 고장", "score": 45.2, "rank": 1 },
+  //   { "failure_type_id": 3, "name": "밸브바디 불량", "score": 30.1, "rank": 2 },
+  //   { "failure_type_id": 2, "name": "클러치 마모", "score": 24.7, "rank": 3 }
+  // ]
+  results                  Json     // [{failure_type_id, score, rank}, ...]
+  created_at               DateTime @default(now())
+
+  case_rel Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  @@unique([case_id, run_version])
+  @@map("diagnosis_runs")
+}
+
+model Quote {
+  id         Int      @id @default(autoincrement())
+  case_id    Int
+  // items 예시:
+  // [
+  //   { "item_name": "토크컨버터", "item_type": "part", "unit_price": 350000, "quantity": 1, "subtotal": 350000 },
+  //   { "item_name": "공임", "item_type": "labor", "unit_price": 200000, "quantity": 1, "subtotal": 200000 }
+  // ]
+  items      Json
+  total      Int      @default(0)
+  memo       String?  @db.Text
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  case_rel Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  @@map("quotes")
+}
+
+model Snapshot {
+  id                  Int      @id @default(autoincrement())
+  case_id             Int
+  snapshot_type       String   @db.VarChar(30) // "final_snapshot"
+  // data 예시:
+  // {
+  //   "vehicle": { "plate_number": "320가6190", "manufacturer": "현대", ... },
+  //   "symptoms": [{ "id": 1, "name": "주행 중 변속 충격" }, ...],
+  //   "answers": [{ "question_id": 1, "text": "RPM이 높아지나요?", "answer": true }, ...],
+  //   "diagnosis": [{ "failure_type_id": 1, "name": "토크컨버터 고장", "score": 45.2, "rank": 1 }, ...],
+  //   "quote": { "items": [...], "total": 550000 }
+  // }
+  data                Json
+  actual_failure_type String?  @db.VarChar(100)
+  work_description    String?  @db.Text
+  final_charge        Int?
+  is_rework           Boolean  @default(false)
+  created_at          DateTime @default(now())
+
+  case_rel Case @relation(fields: [case_id], references: [id], onDelete: Cascade)
+
+  @@map("snapshots")
+}

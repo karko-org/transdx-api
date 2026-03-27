@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: transdx-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: transdx_dev
+      POSTGRES_USER: transdx_user
+      POSTGRES_PASSWORD: transdx_local_pw
+    volumes:
+      - transdx_pgdata:/var/lib/postgresql/data
+
+volumes:
+  transdx_pgdata:
