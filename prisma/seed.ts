@@ -4,6 +4,7 @@ import { seedFailureTypes } from "./seeds/failureTypes";
 import { seedQuestions } from "./seeds/questions";
 import { seedSymptomCategories } from "./seeds/symptomCategories";
 import { seedSymptoms } from "./seeds/symptoms";
+import { seedAdminUser } from "./seeds/users";
 
 async function main() {
   await seedSymptomCategories(prisma);
@@ -11,7 +12,10 @@ async function main() {
   await seedFailureTypes(prisma);
   await seedQuestions(prisma);
   await seedDiagnosisRules(prisma);
-  console.log("Seeded symptom categories, symptoms, failure types, questions, and diagnosis rules.");
+  await seedAdminUser(prisma);
+  console.log(
+    "Seeded symptom categories, symptoms, failure types, questions, diagnosis rules, and admin user.",
+  );
 }
 
 main()
