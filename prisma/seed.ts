@@ -1,11 +1,17 @@
 import prisma from "../src/lib/prisma";
+import { seedDiagnosisRules } from "./seeds/diagnosisRules";
+import { seedFailureTypes } from "./seeds/failureTypes";
+import { seedQuestions } from "./seeds/questions";
 import { seedSymptomCategories } from "./seeds/symptomCategories";
 import { seedSymptoms } from "./seeds/symptoms";
 
 async function main() {
   await seedSymptomCategories(prisma);
   await seedSymptoms(prisma);
-  console.log("Seeded symptom categories and symptoms.");
+  await seedFailureTypes(prisma);
+  await seedQuestions(prisma);
+  await seedDiagnosisRules(prisma);
+  console.log("Seeded symptom categories, symptoms, failure types, questions, and diagnosis rules.");
 }
 
 main()
