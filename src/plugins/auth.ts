@@ -13,6 +13,8 @@ export async function registerAuth(app: FastifyInstance) {
 
   await app.register(cors, {
     origin: DEFAULT_ADMIN_CONSOLE_ORIGIN,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   });
 
   await app.register(jwt, {
