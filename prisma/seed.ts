@@ -1,9 +1,11 @@
 import prisma from "../src/lib/prisma";
 import { seedSymptomCategories } from "./seeds/symptomCategories";
+import { seedSymptoms } from "./seeds/symptoms";
 
 async function main() {
   await seedSymptomCategories(prisma);
-  console.log("Seeded symptom categories.");
+  await seedSymptoms(prisma);
+  console.log("Seeded symptom categories and symptoms.");
 }
 
 main()
