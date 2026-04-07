@@ -11,6 +11,7 @@
     "db:dev": "prisma validate && prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:reset": "printf 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' | prisma db execute --stdin",
+    "db:seed": "prisma db seed",
     "db:studio": "prisma studio"
   },
   "repository": {
