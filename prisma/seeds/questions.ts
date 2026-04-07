@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 
+const removedQuestionCodes = ["Q-L10"];
+
 const questionsBySymptom = [
   {
     symptomName: "변속기 오일 누유",
@@ -54,11 +56,6 @@ const questionsBySymptom = [
         text: "하네스 커넥터 또는 전기 연결부 근처가 젖어 있다고 정비 이력이 있나요?",
         question_intent: "커넥터 씰 후보 보강",
       },
-      {
-        code: "Q-L10",
-        text: "바닥 액체 색이 붉은색~적갈색으로 보이나요?",
-        question_intent: "ATF 가능성 확인",
-      },
     ],
   },
 ];
@@ -106,6 +103,19 @@ export async function seedQuestions(prisma: PrismaClient) {
     seededQuestions.map((question) => [question.code, question]),
   );
 
+  const removedQuestions =
+    removedQuestionCodes.length === 0
+      ? []
+      : await prisma.question.findMany({
+          where: {
+            code: {
+              in: removedQuestionCodes,
+            },
+          },
+        });
+
+  const removedQuestionIds = removedQuestions.map((question) => question.id);
+
   for (const entry of questionsBySymptom) {
     const symptom = symptomByName.get(entry.symptomName);
 
@@ -113,8 +123,35 @@ export async function seedQuestions(prisma: PrismaClient) {
       throw new Error(`Missing symptom: ${entry.symptomName}`);
     }
 
-    await prisma.$transaction(
-      entry.questions.map((question) => {
+    const desiredQuestionIds = entry.questions.map((question) => {
+      const seededQuestion = questionByCode.get(question.code);
+
+      if (!seededQuestion) {
+        throw new Error(`Missing question: ${question.code}`);
+      }
+
+      return seededQuestion.id;
+    });
+
+    await prisma.$transaction([
+      prisma.symptomQuestion.deleteMany({
+        where: {
+          symptom_id: symptom.id,
+          OR: [
+            {
+              question_id: {
+                in: removedQuestionIds,
+              },
+            },
+            {
+              question_id: {
+                notIn: desiredQuestionIds,
+              },
+            },
+          ],
+        },
+      }),
+      ...entry.questions.map((question) => {
         const seededQuestion = questionByCode.get(question.code);
 
         if (!seededQuestion) {
@@ -135,6 +172,25 @@ export async function seedQuestions(prisma: PrismaClient) {
           },
         });
       }),
-    );
+    ]);
+  }
+
+  if (removedQuestionCodes.length > 0) {
+    await prisma.$transaction([
+      prisma.symptomQuestion.deleteMany({
+        where: {
+          question_id: {
+            in: removedQuestionIds,
+          },
+        },
+      }),
+      prisma.question.deleteMany({
+        where: {
+          code: {
+            in: removedQuestionCodes,
+          },
+        },
+      }),
+    ]);
   }
 }
