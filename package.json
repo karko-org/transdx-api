@@ -7,7 +7,11 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "db:dev": "prisma validate && prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:reset": "printf 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;' | prisma db execute --stdin",
+    "db:studio": "prisma studio"
   },
   "repository": {
     "type": "git",
