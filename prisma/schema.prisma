@@ -66,7 +66,7 @@ model Vehicle {
 
 model SymptomCategory {
   id         Int      @id @default(autoincrement())
-  name       String   @db.VarChar(100)
+  name       String   @unique @db.VarChar(100)
   sort_order Int      @default(0)
   is_active  Boolean  @default(true)
   created_at DateTime @default(now())
@@ -82,6 +82,7 @@ model Symptom {
   category_id Int
   name        String   @db.VarChar(100)
   description String?  @db.Text
+  sort_order  Int      @default(0)
   is_active   Boolean  @default(true)
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
@@ -91,6 +92,7 @@ model Symptom {
   case_symptoms     CaseSymptom[]
 
   @@map("symptoms")
+  @@unique([category_id, name])
 }
 
 model FailureType {
@@ -98,6 +100,7 @@ model FailureType {
   code         String   @unique @db.VarChar(20)
   display_name String   @db.VarChar(100)
   description  String?  @db.Text
+  sort_order   Int      @default(0)
   is_active    Boolean  @default(true)
   created_at   DateTime @default(now())
   updated_at   DateTime @updatedAt
@@ -120,7 +123,6 @@ model Question {
   updated_at      DateTime @updatedAt
 
   symptom_questions     SymptomQuestion[]
-  diagnosis_rules       DiagnosisRule[]
   case_question_answers CaseQuestionAnswer[]
 
   @@map("questions")
@@ -130,29 +132,32 @@ model SymptomQuestion {
   id          Int @id @default(autoincrement())
   symptom_id  Int
   question_id Int
+  sort_order  Int @default(0)
 
-  symptom  Symptom  @relation(fields: [symptom_id], references: [id], onDelete: Cascade)
-  question Question @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  symptom         Symptom          @relation(fields: [symptom_id], references: [id])
+  question        Question         @relation(fields: [question_id], references: [id])
+  diagnosis_rules DiagnosisRule[]
 
   @@unique([symptom_id, question_id])
   @@map("symptom_questions")
 }
 
 model DiagnosisRule {
-  id              Int      @id @default(autoincrement())
-  failure_type_id Int
-  question_id     Int
-  expected_answer Boolean
-  score_delta     Int      @default(0)
-  explanation     String?  @db.Text
-  is_active       Boolean  @default(true)
-  created_at      DateTime @default(now())
-  updated_at      DateTime @updatedAt
+  id                 Int      @id @default(autoincrement())
+  failure_type_id    Int
+  symptom_question_id Int
+  expected_answer    Boolean
+  score_delta        Int      @default(0)
+  explanation        String?  @db.Text
+  is_active          Boolean  @default(true)
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
 
-  failure_type FailureType @relation(fields: [failure_type_id], references: [id])
-  question     Question    @relation(fields: [question_id], references: [id])
+  failure_type    FailureType    @relation(fields: [failure_type_id], references: [id])
+  symptom_question SymptomQuestion @relation(fields: [symptom_question_id], references: [id])
 
   @@map("diagnosis_rules")
+  @@unique([symptom_question_id, failure_type_id, expected_answer])
 }
 
 

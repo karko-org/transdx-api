@@ -1,5 +1,7 @@
 import "dotenv/config";
 import Fastify from "fastify";
+import { adminMasterFailureTypeRoutes } from "./routes/adminMasterFailureTypeRoutes";
+import { adminMasterSymptomRoutes } from "./routes/adminMasterSymptomRoutes";
 import { registerAuth } from "./plugins/auth";
 import { adminAuthRoutes } from "./routes/adminAuth";
 import { adminWorkshopUserRoutes } from "./routes/adminWorkshopUsers";
@@ -30,6 +32,8 @@ app.get("/api/health", async () => {
 await app.register(adminAuthRoutes);
 await app.register(adminWorkshopRoutes);
 await app.register(adminWorkshopUserRoutes);
+await app.register(adminMasterSymptomRoutes);
+await app.register(adminMasterFailureTypeRoutes);
 
 app.listen({ port: PORT, host: HOST }, (err) => {
   if (err) {
