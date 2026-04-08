@@ -26,7 +26,7 @@ export const adminWorkshopRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/admin/workshops — 목록 조회
   app.get(
     "/api/admin/workshops",
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.requireAdmin] },
     async () => {
       const workshops = await listWorkshops();
       return { workshops: workshops.map(serializeWorkshop) };
@@ -36,7 +36,7 @@ export const adminWorkshopRoutes: FastifyPluginAsync = async (app) => {
   // POST /api/admin/workshops — 생성
   app.post(
     "/api/admin/workshops",
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.requireAdmin] },
     async (request, reply) => {
       const parsed = createWorkshopSchema.safeParse(request.body);
 
@@ -52,7 +52,7 @@ export const adminWorkshopRoutes: FastifyPluginAsync = async (app) => {
   // PUT /api/admin/workshops/:id — 수정
   app.put(
     "/api/admin/workshops/:id",
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.requireAdmin] },
     async (request, reply) => {
       const { id: idParam } = request.params as { id: string };
       const id = Number(idParam);
@@ -80,7 +80,7 @@ export const adminWorkshopRoutes: FastifyPluginAsync = async (app) => {
   // DELETE /api/admin/workshops/:id — 삭제
   app.delete(
     "/api/admin/workshops/:id",
-    { preHandler: [app.authenticate] },
+    { preHandler: [app.requireAdmin] },
     async (request, reply) => {
       const { id: idParam } = request.params as { id: string };
       const id = Number(idParam);

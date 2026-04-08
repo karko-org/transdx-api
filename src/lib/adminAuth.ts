@@ -19,6 +19,10 @@ export async function findAdminUserById(id: number) {
   });
 }
 
+export type AdminSessionUser = NonNullable<
+  Awaited<ReturnType<typeof findAdminUserById>>
+>;
+
 export async function verifyAdminCredentials(username: string, password: string) {
   const user = await findAdminUserByUsername(username);
 
@@ -37,13 +41,11 @@ export async function verifyAdminCredentials(username: string, password: string)
 
 export function isAllowedAdminUser(
   user: Awaited<ReturnType<typeof findAdminUserById>> | null,
-): user is NonNullable<Awaited<ReturnType<typeof findAdminUserById>>> {
+): user is AdminSessionUser {
   return Boolean(user && user.role === "admin" && user.is_active);
 }
 
-export function serializeAdminUser(
-  user: NonNullable<Awaited<ReturnType<typeof findAdminUserById>>>,
-) {
+export function serializeAdminUser(user: AdminSessionUser) {
   return {
     id: user.id,
     username: user.username,

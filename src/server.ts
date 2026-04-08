@@ -2,6 +2,7 @@ import "dotenv/config";
 import Fastify from "fastify";
 import { registerAuth } from "./plugins/auth";
 import { adminAuthRoutes } from "./routes/adminAuth";
+import { adminWorkshopUserRoutes } from "./routes/adminWorkshopUsers";
 import { adminWorkshopRoutes } from "./routes/adminWorkshops";
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -28,6 +29,7 @@ app.get("/api/health", async () => {
 
 await app.register(adminAuthRoutes);
 await app.register(adminWorkshopRoutes);
+await app.register(adminWorkshopUserRoutes);
 
 app.listen({ port: PORT, host: HOST }, (err) => {
   if (err) {

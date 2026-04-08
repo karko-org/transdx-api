@@ -65,28 +65,14 @@ export const adminAuthRoutes: FastifyPluginAsync = async (app) => {
   app.get(
     "/api/admin/me",
     {
-      preHandler: [app.authenticate],
+      preHandler: [app.requireAdmin],
     },
     async (request, reply) => {
-      const userId = Number(request.user.sub);
-
-      if (!Number.isInteger(userId)) {
-        return reply.status(401).send({
-          message: "유효하지 않은 인증 정보입니다.",
-        });
-      }
-
-      const user = await findAdminUserById(userId);
+      const user = request.adminUser;
 
       if (!user) {
         return reply.status(401).send({
-          message: "사용자를 찾을 수 없습니다.",
-        });
-      }
-
-      if (!isAllowedAdminUser(user)) {
-        return reply.status(403).send({
-          message: "관리자 계정만 접근할 수 있습니다.",
+          message: "인증이 필요합니다.",
         });
       }
 
