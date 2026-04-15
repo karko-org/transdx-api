@@ -32,6 +32,30 @@ export async function updateWorkshop(
     is_active?: boolean;
   },
 ) {
+  if (data.is_active === false) {
+    return prisma.$transaction(async (tx) => {
+      const workshop = await tx.workshop.update({
+        where: { id },
+        data,
+      });
+
+      await tx.user.updateMany({
+        where: {
+          workshop_id: id,
+          role: {
+            not: "admin",
+          },
+          is_active: true,
+        },
+        data: {
+          is_active: false,
+        },
+      });
+
+      return workshop;
+    });
+  }
+
   return prisma.workshop.update({ where: { id }, data });
 }
 
