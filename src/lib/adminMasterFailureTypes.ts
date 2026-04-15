@@ -38,6 +38,17 @@ export async function findFailureTypeByCode(code: string) {
   });
 }
 
+export async function getNextFailureTypeSortOrder() {
+  const lastFailureType = await prisma.failureType.findFirst({
+    orderBy: [{ sort_order: "desc" }, { id: "desc" }],
+    select: {
+      sort_order: true,
+    },
+  });
+
+  return (lastFailureType?.sort_order ?? 0) + 1;
+}
+
 export async function createFailureType(data: {
   code: string;
   display_name: string;

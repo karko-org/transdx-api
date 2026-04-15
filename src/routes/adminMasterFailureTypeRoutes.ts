@@ -5,6 +5,7 @@ import {
   deleteFailureType,
   findFailureTypeByCode,
   findFailureTypeById,
+  getNextFailureTypeSortOrder,
   listFailureTypes,
   serializeFailureType,
   updateFailureType,
@@ -16,7 +17,7 @@ const failureTypeCreateSchema = z.object({
   code: z.string().trim().min(1).max(20),
   display_name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(5000).nullable().optional(),
-  sort_order: z.number().int().min(0).default(0),
+  sort_order: z.number().int().min(0).optional(),
 });
 
 const failureTypeUpdateSchema = z.object({
@@ -69,7 +70,10 @@ export const adminMasterFailureTypeRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(409).send({ message: "이미 사용 중인 고장유형 코드입니다." });
       }
 
-      const failureType = await createFailureType(parsed.data);
+      const failureType = await createFailureType({
+        ...parsed.data,
+        sort_order: parsed.data.sort_order ?? (await getNextFailureTypeSortOrder()),
+      });
       return reply.status(201).send({
         failure_type: serializeFailureType({
           ...failureType,
