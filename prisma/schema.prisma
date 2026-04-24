@@ -232,6 +232,8 @@ model Case {
   user_id     Int
   vehicle_id  Int
   status      String   @default("draft") @db.VarChar(20) // draft → diagnosed → quoted → completed
+  mileage     Int?
+  memo        String?
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
