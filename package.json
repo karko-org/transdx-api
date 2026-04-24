@@ -47,5 +47,8 @@
     "prisma": "^7.5.0",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
+  },
+  "overrides": {
+    "fast-jwt": "^6.2.0"
   }
 }
