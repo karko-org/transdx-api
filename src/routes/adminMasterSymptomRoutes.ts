@@ -1,6 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import {
+  createAnswerOption,
+  deleteAnswerOption,
+  findAnswerOptionById,
+  findAnswerOptionByQuestionAndValue,
+  listAnswerOptionsByQuestion,
+  serializeAnswerOption,
+  updateAnswerOption,
+} from "../lib/adminMasterAnswerOptions";
+import {
   createDiagnosisRule,
   deleteDiagnosisRule,
   findDiagnosisRuleById,
@@ -9,6 +18,15 @@ import {
   serializeDiagnosisRule,
   updateDiagnosisRule,
 } from "../lib/adminMasterDiagnosisRules";
+import {
+  createEffectRule,
+  deleteEffectRule,
+  findDuplicateEffectRule,
+  findEffectRuleById,
+  listEffectRulesBySymptom,
+  serializeEffectRule,
+  updateEffectRule,
+} from "../lib/adminMasterEffectRules";
 import { findFailureTypeById } from "../lib/adminMasterFailureTypes";
 import {
   createQuestionAndLinkToSymptom,
@@ -47,6 +65,9 @@ import {
 
 const idSchema = z.coerce.number().int().positive();
 
+const ANSWER_FORMATS = ["yes_no_unknown", "yes_no", "low_high_unknown"] as const;
+const EFFECT_TYPES = ["symptom_confidence", "flag"] as const;
+
 const categoryCreateSchema = z.object({
   name: z.string().trim().min(1).max(100),
   sort_order: z.number().int().min(0).default(0),
@@ -77,6 +98,7 @@ const createQuestionLinkSchema = z.discriminatedUnion("mode", [
     code: z.string().trim().min(1).max(20),
     text: z.string().trim().min(1).max(300),
     question_intent: z.string().trim().max(200).nullable().optional(),
+    answer_format: z.enum(ANSWER_FORMATS).optional(),
     sort_order: z.number().int().min(0).default(0),
   }),
   z.object({
@@ -94,13 +116,28 @@ const questionUpdateSchema = z.object({
   code: z.string().trim().min(1).max(20).optional(),
   text: z.string().trim().min(1).max(300).optional(),
   question_intent: z.string().trim().max(200).nullable().optional(),
+  answer_format: z.enum(ANSWER_FORMATS).optional(),
   is_active: z.boolean().optional(),
+});
+
+const answerOptionCreateSchema = z.object({
+  value: z.string().trim().min(1).max(30),
+  label: z.string().trim().min(1).max(50),
+  sort_order: z.number().int().min(0).default(0),
+  is_scoring: z.boolean().optional(),
+});
+
+const answerOptionUpdateSchema = z.object({
+  value: z.string().trim().min(1).max(30).optional(),
+  label: z.string().trim().min(1).max(50).optional(),
+  sort_order: z.number().int().min(0).optional(),
+  is_scoring: z.boolean().optional(),
 });
 
 const diagnosisRuleCreateSchema = z.object({
   symptom_question_id: z.number().int().positive(),
   failure_type_id: z.number().int().positive(),
-  expected_answer: z.boolean(),
+  answer_option_id: z.number().int().positive(),
   score_delta: z.number().int(),
   explanation: z.string().trim().max(5000).nullable().optional(),
   is_active: z.boolean().optional(),
@@ -109,8 +146,60 @@ const diagnosisRuleCreateSchema = z.object({
 const diagnosisRuleUpdateSchema = z.object({
   symptom_question_id: z.number().int().positive().optional(),
   failure_type_id: z.number().int().positive().optional(),
-  expected_answer: z.boolean().optional(),
+  answer_option_id: z.number().int().positive().optional(),
   score_delta: z.number().int().optional(),
+  explanation: z.string().trim().max(5000).nullable().optional(),
+  is_active: z.boolean().optional(),
+});
+
+const effectRuleCreateSchema = z
+  .object({
+    symptom_question_id: z.number().int().positive(),
+    answer_option_id: z.number().int().positive(),
+    effect_type: z.enum(EFFECT_TYPES),
+    symptom_confidence_delta: z.number().int().nullable().optional(),
+    flag_key: z.string().trim().min(1).max(50).nullable().optional(),
+    flag_value: z.boolean().nullable().optional(),
+    explanation: z.string().trim().max(5000).nullable().optional(),
+    is_active: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.effect_type === "symptom_confidence") {
+      if (
+        data.symptom_confidence_delta === undefined ||
+        data.symptom_confidence_delta === null
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "symptom_confidence 효과는 symptom_confidence_delta가 필요합니다.",
+          path: ["symptom_confidence_delta"],
+        });
+      }
+    } else if (data.effect_type === "flag") {
+      if (!data.flag_key) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "flag 효과는 flag_key가 필요합니다.",
+          path: ["flag_key"],
+        });
+      }
+      if (data.flag_value === undefined || data.flag_value === null) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "flag 효과는 flag_value가 필요합니다.",
+          path: ["flag_value"],
+        });
+      }
+    }
+  });
+
+const effectRuleUpdateSchema = z.object({
+  symptom_question_id: z.number().int().positive().optional(),
+  answer_option_id: z.number().int().positive().optional(),
+  effect_type: z.enum(EFFECT_TYPES).optional(),
+  symptom_confidence_delta: z.number().int().nullable().optional(),
+  flag_key: z.string().trim().min(1).max(50).nullable().optional(),
+  flag_value: z.boolean().nullable().optional(),
   explanation: z.string().trim().max(5000).nullable().optional(),
   is_active: z.boolean().optional(),
 });
@@ -461,6 +550,7 @@ export const adminMasterSymptomRoutes: FastifyPluginAsync = async (app) => {
           code: parsed.data.code,
           text: parsed.data.text,
           question_intent: parsed.data.question_intent,
+          answer_format: parsed.data.answer_format,
           sort_order: parsed.data.sort_order,
         });
 
@@ -532,9 +622,12 @@ export const adminMasterSymptomRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(404).send({ message: "질문 연결을 찾을 수 없습니다." });
       }
 
-      if (existing._count.diagnosis_rules > 0) {
+      if (
+        existing._count.diagnosis_rules > 0 ||
+        existing._count.diagnosis_effect_rules > 0
+      ) {
         return reply.status(409).send({
-          message: "진단 룰이 연결된 질문은 먼저 룰을 정리한 뒤 연결 해제할 수 있습니다.",
+          message: "진단 룰 또는 효과 룰이 연결된 질문은 먼저 룰을 정리한 뒤 연결 해제할 수 있습니다.",
         });
       }
 
@@ -600,6 +693,126 @@ export const adminMasterSymptomRoutes: FastifyPluginAsync = async (app) => {
   );
 
   app.get(
+    "/api/admin/master/questions/:id/answer-options",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsedId = parseId((request.params as { id: string }).id);
+      if (!parsedId.success) {
+        return reply.status(400).send({ message: "잘못된 질문 ID입니다." });
+      }
+
+      const question = await findQuestionById(parsedId.data);
+      if (!question) {
+        return reply.status(404).send({ message: "질문을 찾을 수 없습니다." });
+      }
+
+      const options = await listAnswerOptionsByQuestion(parsedId.data);
+      return { answer_options: options.map(serializeAnswerOption) };
+    },
+  );
+
+  app.post(
+    "/api/admin/master/questions/:id/answer-options",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsedId = parseId((request.params as { id: string }).id);
+      if (!parsedId.success) {
+        return reply.status(400).send({ message: "잘못된 질문 ID입니다." });
+      }
+
+      const parsed = answerOptionCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: "입력값을 확인해주세요." });
+      }
+
+      const question = await findQuestionById(parsedId.data);
+      if (!question) {
+        return reply.status(404).send({ message: "질문을 찾을 수 없습니다." });
+      }
+
+      const duplicated = await findAnswerOptionByQuestionAndValue(
+        parsedId.data,
+        parsed.data.value,
+      );
+      if (duplicated) {
+        return reply.status(409).send({ message: "같은 질문에 동일한 옵션 값이 이미 있습니다." });
+      }
+
+      const option = await createAnswerOption({
+        question_id: parsedId.data,
+        ...parsed.data,
+      });
+
+      return reply.status(201).send({
+        answer_option: serializeAnswerOption(option),
+      });
+    },
+  );
+
+  app.put(
+    "/api/admin/master/answer-options/:id",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsedId = parseId((request.params as { id: string }).id);
+      if (!parsedId.success) {
+        return reply.status(400).send({ message: "잘못된 답변 옵션 ID입니다." });
+      }
+
+      const parsed = answerOptionUpdateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: "입력값을 확인해주세요." });
+      }
+
+      const existing = await findAnswerOptionById(parsedId.data);
+      if (!existing) {
+        return reply.status(404).send({ message: "답변 옵션을 찾을 수 없습니다." });
+      }
+
+      if (parsed.data.value && parsed.data.value !== existing.value) {
+        const duplicated = await findAnswerOptionByQuestionAndValue(
+          existing.question_id,
+          parsed.data.value,
+        );
+        if (duplicated) {
+          return reply.status(409).send({ message: "같은 질문에 동일한 옵션 값이 이미 있습니다." });
+        }
+      }
+
+      const option = await updateAnswerOption(parsedId.data, parsed.data);
+      return { answer_option: serializeAnswerOption(option) };
+    },
+  );
+
+  app.delete(
+    "/api/admin/master/answer-options/:id",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsedId = parseId((request.params as { id: string }).id);
+      if (!parsedId.success) {
+        return reply.status(400).send({ message: "잘못된 답변 옵션 ID입니다." });
+      }
+
+      const existing = await findAnswerOptionById(parsedId.data);
+      if (!existing) {
+        return reply.status(404).send({ message: "답변 옵션을 찾을 수 없습니다." });
+      }
+
+      if (
+        existing._count.diagnosis_rules > 0 ||
+        existing._count.diagnosis_effect_rules > 0 ||
+        existing._count.case_question_answers > 0
+      ) {
+        return reply.status(409).send({
+          message: "연결된 룰 또는 운영 답변이 있는 옵션은 삭제할 수 없습니다.",
+        });
+      }
+
+      await deleteAnswerOption(parsedId.data);
+      return reply.status(204).send();
+    },
+  );
+
+  app.get(
     "/api/admin/master/symptoms/:id/diagnosis-rules",
     { preHandler: [app.requireAdmin] },
     async (request, reply) => {
@@ -637,7 +850,22 @@ export const adminMasterSymptomRoutes: FastifyPluginAsync = async (app) => {
         return reply.status(404).send({ message: "고장유형을 찾을 수 없습니다." });
       }
 
-      const duplicated = await findDuplicateDiagnosisRule(parsed.data);
+      const answerOption = await findAnswerOptionById(parsed.data.answer_option_id);
+      if (!answerOption) {
+        return reply.status(404).send({ message: "답변 옵션을 찾을 수 없습니다." });
+      }
+
+      if (answerOption.question_id !== symptomQuestion.question_id) {
+        return reply.status(400).send({
+          message: "답변 옵션이 질문 연결의 질문과 일치하지 않습니다.",
+        });
+      }
+
+      const duplicated = await findDuplicateDiagnosisRule({
+        symptom_question_id: parsed.data.symptom_question_id,
+        failure_type_id: parsed.data.failure_type_id,
+        answer_option_id: parsed.data.answer_option_id,
+      });
       if (duplicated) {
         return reply.status(409).send({ message: "같은 질문/고장유형/답변 조합의 룰이 이미 있습니다." });
       }
@@ -671,11 +899,12 @@ export const adminMasterSymptomRoutes: FastifyPluginAsync = async (app) => {
       const nextSymptomQuestionId =
         parsed.data.symptom_question_id ?? existing.symptom_question_id;
       const nextFailureTypeId = parsed.data.failure_type_id ?? existing.failure_type_id;
-      const nextExpectedAnswer = parsed.data.expected_answer ?? existing.expected_answer;
+      const nextAnswerOptionId = parsed.data.answer_option_id ?? existing.answer_option_id;
 
+      let nextSymptomQuestion = null as Awaited<ReturnType<typeof findSymptomQuestionById>>;
       if (parsed.data.symptom_question_id) {
-        const symptomQuestion = await findSymptomQuestionById(parsed.data.symptom_question_id);
-        if (!symptomQuestion) {
+        nextSymptomQuestion = await findSymptomQuestionById(parsed.data.symptom_question_id);
+        if (!nextSymptomQuestion) {
           return reply.status(404).send({ message: "질문 연결을 찾을 수 없습니다." });
         }
       }
@@ -687,15 +916,38 @@ export const adminMasterSymptomRoutes: FastifyPluginAsync = async (app) => {
         }
       }
 
+      let nextAnswerOption = null as Awaited<ReturnType<typeof findAnswerOptionById>>;
+      if (parsed.data.answer_option_id) {
+        nextAnswerOption = await findAnswerOptionById(parsed.data.answer_option_id);
+        if (!nextAnswerOption) {
+          return reply.status(404).send({ message: "답변 옵션을 찾을 수 없습니다." });
+        }
+      }
+
+      const expectedQuestionId =
+        nextSymptomQuestion?.question_id ??
+        existing.symptom_question.question.id;
+      const candidateAnswerOption =
+        nextAnswerOption ??
+        (await findAnswerOptionById(nextAnswerOptionId));
+      if (
+        candidateAnswerOption &&
+        candidateAnswerOption.question_id !== expectedQuestionId
+      ) {
+        return reply.status(400).send({
+          message: "답변 옵션이 질문 연결의 질문과 일치하지 않습니다.",
+        });
+      }
+
       if (
         nextSymptomQuestionId !== existing.symptom_question_id ||
         nextFailureTypeId !== existing.failure_type_id ||
-        nextExpectedAnswer !== existing.expected_answer
+        nextAnswerOptionId !== existing.answer_option_id
       ) {
         const duplicated = await findDuplicateDiagnosisRule({
           symptom_question_id: nextSymptomQuestionId,
           failure_type_id: nextFailureTypeId,
-          expected_answer: nextExpectedAnswer,
+          answer_option_id: nextAnswerOptionId,
         });
 
         if (duplicated && duplicated.id !== existing.id) {
@@ -723,6 +975,126 @@ export const adminMasterSymptomRoutes: FastifyPluginAsync = async (app) => {
       }
 
       await deleteDiagnosisRule(parsedId.data);
+      return reply.status(204).send();
+    },
+  );
+
+  app.get(
+    "/api/admin/master/symptoms/:id/effect-rules",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsedId = parseId((request.params as { id: string }).id);
+      if (!parsedId.success) {
+        return reply.status(400).send({ message: "잘못된 증상 ID입니다." });
+      }
+
+      const symptom = await findSymptomById(parsedId.data);
+      if (!symptom) {
+        return reply.status(404).send({ message: "증상을 찾을 수 없습니다." });
+      }
+
+      const rules = await listEffectRulesBySymptom(parsedId.data);
+      return { effect_rules: rules.map(serializeEffectRule) };
+    },
+  );
+
+  app.post(
+    "/api/admin/master/effect-rules",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsed = effectRuleCreateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: "입력값을 확인해주세요." });
+      }
+
+      const symptomQuestion = await findSymptomQuestionById(parsed.data.symptom_question_id);
+      if (!symptomQuestion) {
+        return reply.status(404).send({ message: "질문 연결을 찾을 수 없습니다." });
+      }
+
+      const answerOption = await findAnswerOptionById(parsed.data.answer_option_id);
+      if (!answerOption) {
+        return reply.status(404).send({ message: "답변 옵션을 찾을 수 없습니다." });
+      }
+
+      if (answerOption.question_id !== symptomQuestion.question_id) {
+        return reply.status(400).send({
+          message: "답변 옵션이 질문 연결의 질문과 일치하지 않습니다.",
+        });
+      }
+
+      const duplicated = await findDuplicateEffectRule({
+        symptom_question_id: parsed.data.symptom_question_id,
+        answer_option_id: parsed.data.answer_option_id,
+        effect_type: parsed.data.effect_type,
+        flag_key: parsed.data.flag_key ?? null,
+      });
+      if (duplicated) {
+        return reply.status(409).send({
+          message: "같은 질문/답변/효과 종류 조합의 룰이 이미 있습니다.",
+        });
+      }
+
+      const rule = await createEffectRule(parsed.data);
+      return reply.status(201).send({
+        effect_rule: serializeEffectRule(rule),
+      });
+    },
+  );
+
+  app.put(
+    "/api/admin/master/effect-rules/:id",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsedId = parseId((request.params as { id: string }).id);
+      if (!parsedId.success) {
+        return reply.status(400).send({ message: "잘못된 효과 룰 ID입니다." });
+      }
+
+      const parsed = effectRuleUpdateSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.status(400).send({ message: "입력값을 확인해주세요." });
+      }
+
+      const existing = await findEffectRuleById(parsedId.data);
+      if (!existing) {
+        return reply.status(404).send({ message: "효과 룰을 찾을 수 없습니다." });
+      }
+
+      if (parsed.data.symptom_question_id) {
+        const symptomQuestion = await findSymptomQuestionById(parsed.data.symptom_question_id);
+        if (!symptomQuestion) {
+          return reply.status(404).send({ message: "질문 연결을 찾을 수 없습니다." });
+        }
+      }
+
+      if (parsed.data.answer_option_id) {
+        const answerOption = await findAnswerOptionById(parsed.data.answer_option_id);
+        if (!answerOption) {
+          return reply.status(404).send({ message: "답변 옵션을 찾을 수 없습니다." });
+        }
+      }
+
+      const rule = await updateEffectRule(parsedId.data, parsed.data);
+      return { effect_rule: serializeEffectRule(rule) };
+    },
+  );
+
+  app.delete(
+    "/api/admin/master/effect-rules/:id",
+    { preHandler: [app.requireAdmin] },
+    async (request, reply) => {
+      const parsedId = parseId((request.params as { id: string }).id);
+      if (!parsedId.success) {
+        return reply.status(400).send({ message: "잘못된 효과 룰 ID입니다." });
+      }
+
+      const existing = await findEffectRuleById(parsedId.data);
+      if (!existing) {
+        return reply.status(404).send({ message: "효과 룰을 찾을 수 없습니다." });
+      }
+
+      await deleteEffectRule(parsedId.data);
       return reply.status(204).send();
     },
   );

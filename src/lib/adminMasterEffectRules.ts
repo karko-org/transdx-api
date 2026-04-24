@@ -1,7 +1,16 @@
 import prisma from "./prisma";
 
-export async function listDiagnosisRulesBySymptom(symptomId: number) {
-  return prisma.diagnosisRule.findMany({
+const effectRuleInclude = {
+  symptom_question: {
+    include: {
+      question: true,
+    },
+  },
+  answer_option: true,
+};
+
+export async function listEffectRulesBySymptom(symptomId: number) {
+  return prisma.diagnosisEffectRule.findMany({
     where: {
       symptom_question: {
         symptom_id: symptomId,
@@ -9,23 +18,15 @@ export async function listDiagnosisRulesBySymptom(symptomId: number) {
     },
     orderBy: [
       { symptom_question: { sort_order: "asc" } },
-      { failure_type: { sort_order: "asc" } },
+      { effect_type: "asc" },
       { id: "asc" },
     ],
-    include: {
-      symptom_question: {
-        include: {
-          question: true,
-        },
-      },
-      failure_type: true,
-      answer_option: true,
-    },
+    include: effectRuleInclude,
   });
 }
 
-export async function findDiagnosisRuleById(id: number) {
-  return prisma.diagnosisRule.findUnique({
+export async function findEffectRuleById(id: number) {
+  return prisma.diagnosisEffectRule.findUnique({
     where: { id },
     include: {
       symptom_question: {
@@ -34,85 +35,75 @@ export async function findDiagnosisRuleById(id: number) {
           question: true,
         },
       },
-      failure_type: true,
       answer_option: true,
     },
   });
 }
 
-export async function findDuplicateDiagnosisRule(data: {
+export async function findDuplicateEffectRule(data: {
   symptom_question_id: number;
-  failure_type_id: number;
   answer_option_id: number;
+  effect_type: string;
+  flag_key: string | null;
 }) {
-  return prisma.diagnosisRule.findFirst({
+  return prisma.diagnosisEffectRule.findFirst({
     where: data,
   });
 }
 
-export async function createDiagnosisRule(data: {
+export async function createEffectRule(data: {
   symptom_question_id: number;
-  failure_type_id: number;
   answer_option_id: number;
-  score_delta: number;
+  effect_type: string;
+  symptom_confidence_delta?: number | null;
+  flag_key?: string | null;
+  flag_value?: boolean | null;
   explanation?: string | null;
   is_active?: boolean;
 }) {
-  return prisma.diagnosisRule.create({
+  return prisma.diagnosisEffectRule.create({
     data: {
       ...data,
       is_active: data.is_active ?? true,
     },
-    include: {
-      symptom_question: {
-        include: {
-          question: true,
-        },
-      },
-      failure_type: true,
-      answer_option: true,
-    },
+    include: effectRuleInclude,
   });
 }
 
-export async function updateDiagnosisRule(
+export async function updateEffectRule(
   id: number,
   data: Partial<{
     symptom_question_id: number;
-    failure_type_id: number;
     answer_option_id: number;
-    score_delta: number;
+    effect_type: string;
+    symptom_confidence_delta: number | null;
+    flag_key: string | null;
+    flag_value: boolean | null;
     explanation: string | null;
     is_active: boolean;
   }>,
 ) {
-  return prisma.diagnosisRule.update({
+  return prisma.diagnosisEffectRule.update({
     where: { id },
     data,
-    include: {
-      symptom_question: {
-        include: {
-          question: true,
-        },
-      },
-      failure_type: true,
-      answer_option: true,
-    },
+    include: effectRuleInclude,
   });
 }
 
-export async function deleteDiagnosisRule(id: number) {
-  return prisma.diagnosisRule.delete({
+export async function deleteEffectRule(id: number) {
+  return prisma.diagnosisEffectRule.delete({
     where: { id },
   });
 }
 
-export function serializeDiagnosisRule(rule: {
+export function serializeEffectRule(rule: {
   id: number;
   symptom_question_id: number;
-  failure_type_id: number;
   answer_option_id: number;
-  score_delta: number;
+  effect_type: string;
+  symptom_confidence_delta: number | null;
+  flag_key: string | null;
+  flag_value: boolean | null;
   explanation: string | null;
   is_active: boolean;
   created_at: Date;
@@ -127,12 +118,6 @@ export function serializeDiagnosisRule(rule: {
       answer_format: string;
     };
   };
-  failure_type: {
-    id: number;
-    code: string;
-    display_name: string;
-    sort_order: number;
-  };
   answer_option: {
     id: number;
     value: string;
@@ -144,9 +129,11 @@ export function serializeDiagnosisRule(rule: {
   return {
     id: rule.id,
     symptom_question_id: rule.symptom_question_id,
-    failure_type_id: rule.failure_type_id,
     answer_option_id: rule.answer_option_id,
-    score_delta: rule.score_delta,
+    effect_type: rule.effect_type,
+    symptom_confidence_delta: rule.symptom_confidence_delta,
+    flag_key: rule.flag_key,
+    flag_value: rule.flag_value,
     explanation: rule.explanation,
     is_active: rule.is_active,
     created_at: rule.created_at.toISOString(),
@@ -160,12 +147,6 @@ export function serializeDiagnosisRule(rule: {
         text: rule.symptom_question.question.text,
         answer_format: rule.symptom_question.question.answer_format,
       },
-    },
-    failure_type: {
-      id: rule.failure_type.id,
-      code: rule.failure_type.code,
-      display_name: rule.failure_type.display_name,
-      sort_order: rule.failure_type.sort_order,
     },
     answer_option: {
       id: rule.answer_option.id,
