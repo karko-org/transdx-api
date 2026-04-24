@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-const removedQuestionCodes = ["Q-L10"];
+const removedQuestionCodes = ["Q-L03a", "Q-L03b", "Q-L05"];
 
 const questionsBySymptom = [
   {
@@ -8,63 +8,80 @@ const questionsBySymptom = [
     questions: [
       {
         code: "Q-L01",
-        text: "오일 자국이 차량 정중앙 하부에 주로 맺히나요?",
-        question_intent: "팬/하부 접합부 가능성 확인",
+        text: "오일 자국이 차량 정중앙 하부(변속기 바로 밑바닥)에 주로 맺히나요?",
+        question_intent: "팬/하부 접합부 누유 가능성 확인",
+        answer_format: "yes_no_unknown",
         sort_order: 1,
       },
       {
         code: "Q-L02",
         text: "오일이 차량 전면 쪽 라인 또는 라디에이터 근처에서 보이나요?",
         question_intent: "쿨러 라인 누유 판별",
+        answer_format: "yes_no_unknown",
         sort_order: 2,
       },
       {
-        code: "Q-L03a",
-        text: "누유가 소량 (한 방울씩 맺히는 수준)인가요?",
-        question_intent: "누유 심도 추정",
+        code: "Q-L03",
+        text: "누유 양은 어느 정도인가요?",
+        question_intent: "누유 심도 및 긴급도 추정",
+        answer_format: "low_high_unknown",
         sort_order: 3,
-      },
-      {
-        code: "Q-L03b",
-        text: "누유가 다량 (바닥에 번질 정도)인가요?",
-        question_intent: "누유 심도 추정",
-        sort_order: 4,
       },
       {
         code: "Q-L04",
         text: "최근 변속기 오일 보충 또는 교환 직후부터 새기 시작했나요?",
-        question_intent: "플러그/체결부/레벨부 가능성 확인",
-        sort_order: 5,
-      },
-      {
-        code: "Q-L05",
-        text: "누유와 함께 변속 지연·슬립·과열 증상이 있나요?",
-        question_intent: "누유 심화 여부 및 우선순위 조정",
-        sort_order: 6,
+        question_intent: "드레인 플러그·체결부·레벨부 가능성 확인",
+        answer_format: "yes_no_unknown",
+        sort_order: 4,
       },
       {
         code: "Q-L06",
-        text: "오일이 축 회전부 주변에서 흩뿌려진 듯 보인다고 하나요?",
-        question_intent: "입력축/출력축 오일실 가능성 확인",
-        sort_order: 7,
+        text: "오일이 축 회전부 주변(변속기 앞·뒤 회전축 근처)에서 흩뿌려진 듯 보인다고 하나요?",
+        question_intent: "입력축·출력축 오일실 가능성 확인",
+        answer_format: "yes_no_unknown",
+        sort_order: 5,
       },
       {
         code: "Q-L07",
         text: "변속기 하부 전체가 젖어 있어 정확한 시작 지점이 불명확한가요?",
-        question_intent: "케이스/커넥터/복합 누유 가능성",
-        sort_order: 8,
+        question_intent: "케이스/커넥터/복합 누유 가능성, 브리더 과압 누유 포함",
+        answer_format: "yes_no",
+        sort_order: 6,
       },
       {
         code: "Q-L08",
-        text: "차량 연식이 오래됐거나 장기간 미정비 이력이 있나요?",
-        question_intent: "씰·가스켓 열화 가중치",
-        sort_order: 9,
+        text: "차량 연식이 오래됐거나(10년 이상) 장기간 ATF 무교환·미정비 이력이 있나요?",
+        question_intent: "씰·가스켓 노후 열화 가중치",
+        answer_format: "yes_no_unknown",
+        sort_order: 7,
       },
       {
         code: "Q-L09",
-        text: "하네스 커넥터 또는 전기 연결부 근처가 젖어 있다고 정비 이력이 있나요?",
-        question_intent: "커넥터 씰 후보 보강",
+        text: "변속기 옆면의 전기 커넥터·하네스 근처가 젖어 있거나, 하네스를 타고 오일이 올라온 흔적이 있나요?",
+        question_intent: "관통부 커넥터 씰 누유 확인",
+        answer_format: "yes_no_unknown",
+        sort_order: 8,
+      },
+      {
+        code: "Q-L10",
+        text: "누유 위치가 변속기 앞쪽(엔진과의 결합부, 벨하우징) 근처인가요?",
+        question_intent: "토크컨버터·프론트 펌프 씰 가능성 확인",
+        answer_format: "yes_no_unknown",
+        sort_order: 9,
+      },
+      {
+        code: "Q-L11",
+        text: "누유 위치가 변속기 뒤쪽(프로펠러 샤프트 연결부, 후륜·4WD 차량) 근처인가요?",
+        question_intent: "테일하우징 씰 가능성 확인",
+        answer_format: "yes_no_unknown",
         sort_order: 10,
+      },
+      {
+        code: "Q-L12",
+        text: "바닥 액체 색이 붉은색~적갈색으로 보이나요?",
+        question_intent: "ATF 확정 여부(아니오면 타 계통 우선 검토)",
+        answer_format: "yes_no_unknown",
+        sort_order: 11,
       },
     ],
   },
@@ -80,12 +97,14 @@ export async function seedQuestions(prisma: PrismaClient) {
         update: {
           text: question.text,
           question_intent: question.question_intent,
+          answer_format: question.answer_format,
           is_active: true,
         },
         create: {
           code: question.code,
           text: question.text,
           question_intent: question.question_intent,
+          answer_format: question.answer_format,
         },
       }),
     ),
