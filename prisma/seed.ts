@@ -6,7 +6,7 @@ import { seedFailureTypes } from "./seeds/failureTypes";
 import { seedQuestions } from "./seeds/questions";
 import { seedSymptomCategories } from "./seeds/symptomCategories";
 import { seedSymptoms } from "./seeds/symptoms";
-import { seedAdminUser } from "./seeds/users";
+import { seedAdminUser, seedCounselorUser } from "./seeds/users";
 
 async function main() {
   await seedSymptomCategories(prisma);
@@ -17,8 +17,9 @@ async function main() {
   await seedDiagnosisRules(prisma);
   await seedDiagnosisEffectRules(prisma);
   await seedAdminUser(prisma);
+  await seedCounselorUser(prisma);
   console.log(
-    "Seeded symptom categories, symptoms, failure types, questions, answer options, diagnosis rules, diagnosis effect rules, and admin user.",
+    "Seeded symptom categories, symptoms, failure types, questions, answer options, diagnosis rules, diagnosis effect rules, admin user, and counselor user (if env set).",
   );
 }
 

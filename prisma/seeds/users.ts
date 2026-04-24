@@ -4,6 +4,8 @@ import type { PrismaClient } from "@prisma/client";
 const ADMIN_WORKSHOP_NAME = "kar";
 const ADMIN_DISPLAY_NAME = "Admin";
 const ADMIN_ROLE = "admin";
+const COUNSELOR_DISPLAY_NAME = "테스트 상담자";
+const COUNSELOR_ROLE = "counselor";
 const BCRYPT_SALT_ROUNDS = 10;
 
 function getRequiredEnv(name: string) {
@@ -55,6 +57,47 @@ export async function seedAdminUser(prisma: PrismaClient) {
       password_hash: passwordHash,
       name: ADMIN_DISPLAY_NAME,
       role: ADMIN_ROLE,
+      is_active: true,
+    },
+  });
+}
+
+export async function seedCounselorUser(prisma: PrismaClient) {
+  const username = process.env.COUNSELOR_SEED_USERNAME?.trim();
+  const password = process.env.COUNSELOR_SEED_PASSWORD?.trim();
+
+  if (!username || !password) {
+    return;
+  }
+
+  const adminWorkshop = await prisma.workshop.findFirst({
+    where: { name: ADMIN_WORKSHOP_NAME },
+    orderBy: { id: "asc" },
+  });
+
+  if (!adminWorkshop) {
+    throw new Error(
+      "Admin workshop not found. seedAdminUser must run before seedCounselorUser.",
+    );
+  }
+
+  const passwordHash = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+
+  await prisma.user.upsert({
+    where: { username },
+    update: {
+      workshop_id: adminWorkshop.id,
+      password_hash: passwordHash,
+      name: COUNSELOR_DISPLAY_NAME,
+      role: COUNSELOR_ROLE,
+      is_active: true,
+    },
+    create: {
+      workshop_id: adminWorkshop.id,
+      username,
+      password_hash: passwordHash,
+      name: COUNSELOR_DISPLAY_NAME,
+      role: COUNSELOR_ROLE,
       is_active: true,
     },
   });
