@@ -118,14 +118,35 @@ model Question {
   code            String   @unique @db.VarChar(20)
   text            String   @db.VarChar(300)
   question_intent String?  @db.VarChar(200)
+  answer_format   String   @default("yes_no_unknown") @db.VarChar(30)
   is_active       Boolean  @default(true)
   created_at      DateTime @default(now())
   updated_at      DateTime @updatedAt
 
   symptom_questions     SymptomQuestion[]
   case_question_answers CaseQuestionAnswer[]
+  answer_options        QuestionAnswerOption[]
 
   @@map("questions")
+}
+
+model QuestionAnswerOption {
+  id          Int      @id @default(autoincrement())
+  question_id Int
+  value       String   @db.VarChar(30)
+  label       String   @db.VarChar(50)
+  sort_order  Int      @default(0)
+  is_scoring  Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  question                Question              @relation(fields: [question_id], references: [id], onDelete: Cascade)
+  diagnosis_rules         DiagnosisRule[]
+  diagnosis_effect_rules  DiagnosisEffectRule[]
+  case_question_answers   CaseQuestionAnswer[]
+
+  @@unique([question_id, value])
+  @@map("question_answer_options")
 }
 
 model SymptomQuestion {
@@ -134,30 +155,52 @@ model SymptomQuestion {
   question_id Int
   sort_order  Int @default(0)
 
-  symptom         Symptom          @relation(fields: [symptom_id], references: [id])
-  question        Question         @relation(fields: [question_id], references: [id])
-  diagnosis_rules DiagnosisRule[]
+  symptom                Symptom               @relation(fields: [symptom_id], references: [id])
+  question               Question              @relation(fields: [question_id], references: [id])
+  diagnosis_rules        DiagnosisRule[]
+  diagnosis_effect_rules DiagnosisEffectRule[]
 
   @@unique([symptom_id, question_id])
   @@map("symptom_questions")
 }
 
 model DiagnosisRule {
-  id                 Int      @id @default(autoincrement())
-  failure_type_id    Int
+  id                  Int      @id @default(autoincrement())
+  failure_type_id     Int
   symptom_question_id Int
-  expected_answer    Boolean
-  score_delta        Int      @default(0)
-  explanation        String?  @db.Text
-  is_active          Boolean  @default(true)
-  created_at         DateTime @default(now())
-  updated_at         DateTime @updatedAt
+  answer_option_id    Int
+  score_delta         Int      @default(0)
+  explanation         String?  @db.Text
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
 
-  failure_type    FailureType    @relation(fields: [failure_type_id], references: [id])
-  symptom_question SymptomQuestion @relation(fields: [symptom_question_id], references: [id])
+  failure_type     FailureType          @relation(fields: [failure_type_id], references: [id])
+  symptom_question SymptomQuestion      @relation(fields: [symptom_question_id], references: [id])
+  answer_option    QuestionAnswerOption @relation(fields: [answer_option_id], references: [id])
 
   @@map("diagnosis_rules")
-  @@unique([symptom_question_id, failure_type_id, expected_answer])
+  @@unique([symptom_question_id, failure_type_id, answer_option_id])
+}
+
+model DiagnosisEffectRule {
+  id                       Int      @id @default(autoincrement())
+  symptom_question_id      Int
+  answer_option_id         Int
+  effect_type              String   @db.VarChar(30)
+  symptom_confidence_delta Int?
+  flag_key                 String?  @db.VarChar(50)
+  flag_value               Boolean?
+  explanation              String?  @db.Text
+  is_active                Boolean  @default(true)
+  created_at               DateTime @default(now())
+  updated_at               DateTime @updatedAt
+
+  symptom_question SymptomQuestion      @relation(fields: [symptom_question_id], references: [id])
+  answer_option    QuestionAnswerOption @relation(fields: [answer_option_id], references: [id])
+
+  @@unique([symptom_question_id, answer_option_id, effect_type, flag_key])
+  @@map("diagnosis_effect_rules")
 }
 
 
@@ -218,13 +261,14 @@ model CaseSymptom {
 }
 
 model CaseQuestionAnswer {
-  id          Int     @id @default(autoincrement())
-  case_id     Int
-  question_id Int
-  answer      Boolean
+  id               Int @id @default(autoincrement())
+  case_id          Int
+  question_id      Int
+  answer_option_id Int
 
-  case_rel Case     @relation(fields: [case_id], references: [id], onDelete: Cascade)
-  question Question @relation(fields: [question_id], references: [id])
+  case_rel      Case                 @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  question      Question             @relation(fields: [question_id], references: [id])
+  answer_option QuestionAnswerOption @relation(fields: [answer_option_id], references: [id])
 
   @@unique([case_id, question_id])
   @@map("case_question_answers")
@@ -235,15 +279,29 @@ model DiagnosisRun {
   case_id                  Int
   run_version              Int      @default(1)
   selected_failure_type_id Int?
+  symptom_confidence_score Int      @default(0)
   created_at               DateTime @default(now())
 
-  case_rel   Case                    @relation(fields: [case_id], references: [id], onDelete: Cascade)
-  candidates DiagnosisRunCandidate[]
-  selected_failure_type FailureType? @relation(fields: [selected_failure_type_id], references: [id], onDelete: SetNull)
+  case_rel              Case                    @relation(fields: [case_id], references: [id], onDelete: Cascade)
+  candidates            DiagnosisRunCandidate[]
+  selected_failure_type FailureType?            @relation(fields: [selected_failure_type_id], references: [id], onDelete: SetNull)
+  flags                 DiagnosisRunFlag[]
 
 
   @@unique([case_id, run_version])
   @@map("diagnosis_runs")
+}
+
+model DiagnosisRunFlag {
+  id               Int     @id @default(autoincrement())
+  diagnosis_run_id Int
+  flag_key         String  @db.VarChar(50)
+  flag_value       Boolean
+
+  diagnosis_run DiagnosisRun @relation(fields: [diagnosis_run_id], references: [id], onDelete: Cascade)
+
+  @@unique([diagnosis_run_id, flag_key])
+  @@map("diagnosis_run_flags")
 }
 
 model DiagnosisRunCandidate {
