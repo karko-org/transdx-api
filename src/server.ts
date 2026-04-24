@@ -7,6 +7,8 @@ import { adminAuthRoutes } from "./routes/adminAuth";
 import { adminWorkshopUserRoutes } from "./routes/adminWorkshopUsers";
 import { adminWorkshopRoutes } from "./routes/adminWorkshops";
 import { counselorAuthRoutes } from "./routes/counselorAuthRoutes";
+import { counselorCaseRoutes } from "./routes/counselorCaseRoutes";
+import { counselorVehicleRoutes } from "./routes/counselorVehicleRoutes";
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
@@ -36,6 +38,8 @@ await app.register(adminWorkshopUserRoutes);
 await app.register(adminMasterSymptomRoutes);
 await app.register(adminMasterFailureTypeRoutes);
 await app.register(counselorAuthRoutes);
+await app.register(counselorCaseRoutes);
+await app.register(counselorVehicleRoutes);
 
 app.listen({ port: PORT, host: HOST }, (err) => {
   if (err) {
