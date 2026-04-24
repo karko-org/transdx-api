@@ -2,7 +2,13 @@
 
 **작성일**: 2026-04-24
 **범위**: 모바일 앱의 Mock 데이터를 실 API로 전환
-**소요 예상**: 2.5~3.5시간 (5 sub-chunks)
+**소요 예상**: 3.5~4시간 (5e-a가 6 sub-chunks로 확장됨)
+- 5e-a: ~100분 (6 sub-chunks)
+- 5e-b: 20분
+- 5e-c: 20분
+- 5e-d: 30분
+- 5e-e: 40분
+- E2E + 마무리: 15분
 
 ---
 
@@ -15,11 +21,21 @@ Week 3 Step 5d 완료 상태:
 - 현재 모든 데이터가 Mock: `MOCK_CASES` 배열, 하드코딩된 차량 매칭, `"dummy-token-for-testing"` 로그인
 - `TODO(5e)` + `MOCKUP` 주석으로 교체 지점 마킹됨
 
-백엔드 현재 상태 (origin/main):
-- 인증: `/api/admin/login`, `/api/auth/login`, `/api/auth/me` 작동
+백엔드 현재 상태 (origin/main, 2026-04-24 실측):
+- 인증: `/api/admin/login` 작동 (admin 전용)
 - 마스터 데이터 CRUD (Week 2 완료)
 - M01 seed 완료 (multi-choice answer model)
-- **케이스/차량 CRUD 엔드포인트 없음** ← 이번 Step 5e-a에서 추가
+
+**Step 5e-a 진입 시 보이지 않던 전제 (실측으로 발견된 drift)**:
+- `/api/auth/login`, `/api/auth/me` (counselor) — 미구현
+- `requireCounselor` 미들웨어 — 미구현
+- `seedCounselorUser` — 미구현
+- `Case.mileage` 필드 — CLAUDE.md 선반영 미적용
+- `Case.memo` 필드 — 스키마에 없음
+- Case 관련 참조명: Plan은 `created_by`, 실제는 `user_id`
+- Vehicle.workshop_id — 없음 (차량은 공업사 종속 아님)
+
+이 drift들 전부 5e-a로 스코프 확장하여 처리.
 
 ### 의도된 결과
 
@@ -55,138 +71,134 @@ Week 3 Step 5d 완료 상태:
 
 ---
 
-## Chunk 5e-a: 백엔드 케이스 + 차량 CRUD
+## Chunk 5e-a: 백엔드 인증 인프라 + 케이스/차량 CRUD
 
 **레포**: `transdx-api`
-**소요**: 40~50분
+**소요**: 약 100분 (원 Plan 추정 40~50분의 2배, drift 반영)
 
-### 신규 엔드포인트 4개
+6개 sub-chunk로 분할, 각 단독 commit 가능.
 
-```
-GET    /api/cases?status=draft,diagnosed    → 케이스 목록 (필터링)
-POST   /api/cases                           → 케이스 생성 (차량 upsert 포함)
-DELETE /api/cases/:id                       → 케이스 삭제 (hard)
-GET    /api/vehicles?plate_number=12가3456  → 차량 lookup (404 가능)
-```
+### Sub-chunk 5e-a.0: Schema Migration
 
-### 파일 작업
+**파일**: `prisma/schema.prisma`
 
-**신규 파일**:
-- `src/lib/counselorCases.ts` — 케이스 CRUD + 차량 upsert 로직
-- `src/lib/counselorVehicles.ts` — 차량 lookup 로직
-- `src/routes/counselorCaseRoutes.ts` — `/api/cases` 라우트
-- `src/routes/counselorVehicleRoutes.ts` — `/api/vehicles` 라우트
+Case 모델에 2 필드 추가:
+- `mileage Int?` (주행거리, nullable, 방문 시점 스냅샷)
+- `memo String?` (상담 메모, nullable)
 
-**수정 파일**:
-- `src/server.ts` — 신규 라우트 등록
+Migration 생성: `prisma migrate diff + migrate deploy` 패턴 
+(docs/prisma-migration-workflow.md 참조).
 
-### 설계 상세
+Migration 이름: `add_case_mileage_and_memo`.
 
-#### counselorCases.ts
+커밋 범위:
+- `prisma/schema.prisma`
+- `prisma/migrations/[timestamp]_add_case_mileage_and_memo/migration.sql`
 
-```typescript
-// listCases(workshopId, { status?, limit?, cursor? })
-//   - status 파라미터: 쉼표 구분 ("draft,diagnosed")
-//   - workshop_id 기반 스코프 (multi-tenant 안전)
-//   - created_at DESC 정렬
-//   - 포함 relation: vehicle (plate_number, customer_name)
+검증:
+- [ ] `npm run db:dev` 성공 (또는 migrate diff 패턴)
+- [ ] `npx prisma generate` 성공
+- [ ] 타입 에러 없음 (case.mileage, case.memo 접근 가능)
 
-// createCase(workshopId, counselorId, input)
-//   - input: { plate_number, customer_name?, customer_phone?, mileage?, memo? }
-//   - Prisma $transaction 사용
-//   - 1) vehicle upsert (plate_number unique key)
-//   - 2) case 생성 (vehicle_id 연결, workshop_id + created_by = counselor)
-//   - 반환: 생성된 case + vehicle
+### Sub-chunk 5e-a.1: Counselor Auth 인프라
 
-// deleteCase(caseId, workshopId)
-//   - workshop_id 검증 (다른 공업사 케이스 삭제 방지)
-//   - draft 상태만 삭제 허용? 또는 모든 상태?
-//     → draft만 허용이 안전 (진단 완료된 케이스는 기록 가치)
-//     → 하지만 Plan 스코프: "hard delete, 나중 soft delete 전환"
-//     → 이번엔 모든 상태 허용, 대신 diagnosed+ 상태 삭제 시 warning 로그
-//   - Prisma cascade 정책: case_symptoms, case_question_answers, 
-//     diagnosis_runs, quotes 자동 삭제되는지 확인 필요
-```
+**파일**:
+- `src/plugins/auth.ts` — `requireCounselor` 데코레이터 추가
+- `src/routes/counselorAuthRoutes.ts` — 신규
+- `src/server.ts` — 라우트 등록
 
-#### counselorVehicles.ts
+#### requireCounselor 미들웨어
 
-```typescript
-// lookupVehicle(plateNumber)
-//   - Vehicle 테이블 findUnique by plate_number
-//   - 없으면 null 반환 (라우트 레이어에서 404 변환)
-//   - 공백 정규화: plate_number 대소문자/공백 처리
-//     → 입력 trim + 한글 보존, "12 가 3456" → "12가3456"
-```
+기존 `requireAdmin` 패턴 모방. role ∈ {counselor, manager} 허용. 
+admin 토큰 거부.
 
-#### 인증
+`request.counselor`에 `{ user_id, workshop_id, role }` 주입.
 
-- 모든 엔드포인트 `requireCounselor` preHandler (기존 미들웨어)
-- `request.counselor` 세션에서 `workshop_id`, `user_id` 사용
+#### counselorAuthRoutes
 
-#### Zod 스키마
+- `POST /api/auth/login` — username/password → JWT (role=counselor/manager인 
+  user만 허용, 아니면 401)
+- `GET /api/auth/me` — token 검증 후 user 반환
 
-```typescript
-// listCasesQuerySchema
-//   - status: z.string().optional().transform(str => str?.split(','))
+JWT payload: `{ user_id, workshop_id, role, type: "counselor" }`.
+(admin token과 구분하기 위한 `type` 필드)
 
-// createCaseBodySchema  
-//   - plate_number: z.string().min(1).transform(trim)
-//   - customer_name: z.string().optional()
-//   - customer_phone: z.string().optional()
-//   - mileage: z.number().int().nonnegative().optional()
-//   - memo: z.string().optional()
+#### requireCounselor 검증
 
-// deleteCaseParamSchema
-//   - id: z.coerce.number().int().positive()
+- token type이 "counselor"여야 통과
+- admin token은 403 반환
 
-// lookupVehicleQuerySchema
-//   - plate_number: z.string().min(1).transform(trim)
-```
-
-### 검증 기준
-
-- [ ] 4개 엔드포인트 작성 + 라우트 등록
-- [ ] Zod 검증 모든 입력에 적용 (400 on invalid)
-- [ ] workshop_id 스코프 검증 (403 on mismatch)
+검증:
 - [ ] `npm run build` 0 errors
-- [ ] 수동 curl 테스트:
-  - [ ] counselor 로그인 → token
-  - [ ] POST /api/cases (신규 차량) → 200 + case + vehicle
-  - [ ] POST /api/cases (기존 차량) → 200 + case + 기존 vehicle
-  - [ ] GET /api/cases → 생성된 케이스 포함
-  - [ ] GET /api/cases?status=draft → 필터링 작동
-  - [ ] GET /api/vehicles?plate_number=존재 → 200 + vehicle
-  - [ ] GET /api/vehicles?plate_number=없음 → 404
-  - [ ] DELETE /api/cases/:id → 200 + 실제 삭제 확인
-  - [ ] 다른 workshop의 case 삭제 시도 → 403/404
+- [ ] (Sub-chunk 5e-a.2 완료 후) curl login → token 발급
+- [ ] curl /me → user 반환
+- [ ] admin token으로 counselor endpoint 접근 → 403
 
-### 커밋
+### Sub-chunk 5e-a.2: seedCounselorUser
 
-```
-feat(api): add cases and vehicles CRUD endpoints for counselor
+**파일**:
+- `prisma/seeds/users.ts` — `seedCounselorUser()` 추가
+- `prisma/seed.ts` — 호출 추가
 
-Counselor-facing endpoints for case management, required by Week 3 
-Step 5e mobile API integration.
+`.env` 변수: `COUNSELOR_SEED_USERNAME`, `COUNSELOR_SEED_PASSWORD`
 
-Endpoints:
-- GET /api/cases?status=... — list cases filtered by status (comma-separated)
-- POST /api/cases — create case with vehicle upsert in transaction
-- DELETE /api/cases/:id — hard delete (deferred soft delete to Week 5+)
-- GET /api/vehicles?plate_number=... — vehicle lookup, 404 if not found
+Admin workshop에 counselor 역할로 생성. 이미 있으면 password만 갱신.
 
-Implementation notes:
-- Vehicle creation happens automatically on case creation when 
-  plate_number is new; uses Prisma $transaction for atomicity
-- All endpoints scoped by request.counselor.workshop_id (multi-tenant 
-  safety)
-- Hard delete chosen for simplicity; soft delete planned when 
-  diagnosis/quote workflows mature (Week 5+)
+검증:
+- [ ] `npm run db:seed` 성공
+- [ ] DB에 counselor user row 생성 확인
+- [ ] 5e-a.1의 login curl이 이제 성공
 
-Verified:
-- npm run build: 0 errors
-- All curl tests pass (create/read/delete/lookup)
-- workshop_id scope enforcement: cross-workshop delete rejected
-```
+### Sub-chunk 5e-a.3: Cases CRUD
+
+**파일**:
+- `src/lib/counselorCases.ts` — 신규
+- `src/routes/counselorCaseRoutes.ts` — 신규
+
+기능:
+- `listCases(workshopId, { statusFilter })` — 필터링 + 정렬
+- `createCaseWithVehicle(input)` — Prisma $transaction, vehicle upsert
+- `deleteCase({ caseId, workshopId })` — cascade로 단순 delete
+
+**실측 반영**:
+- Vehicle 모델에 `workshop_id` 없음 → upsert에서 제외
+- Case 모델 참조명: `user_id`, relation `user` (created_by 아님)
+- Cascade 정책: 모든 자식 관계 onDelete: Cascade → 단순 `prisma.case.delete()` OK
+
+API 응답 wrapping: `{ cases: [...] }`, `{ case: {...} }`
+
+### Sub-chunk 5e-a.4: Vehicles Lookup
+
+**파일**:
+- `src/lib/counselorVehicles.ts` — 신규
+- `src/routes/counselorVehicleRoutes.ts` — 신규
+
+`lookupVehicleByPlate(plateNumber)`:
+- 입력 정규화: trim + 공백 제거
+- findUnique by plate_number
+- 없으면 null → 라우트에서 404
+
+응답 wrapping: `{ vehicle: {...} }`.
+
+### Sub-chunk 5e-a.5: server.ts 등록 + 동적 검증 + commit
+
+**파일**: `src/server.ts` — counselor 라우트 3개 등록
+- counselorAuthRoutes
+- counselorCaseRoutes  
+- counselorVehicleRoutes
+
+동적 검증 (9 curl):
+1. counselor login → token
+2. POST /api/cases (신규 차량) → 201 + case + vehicle
+3. POST /api/cases (기존 차량) → upsert 확인 (같은 vehicle_id)
+4. GET /api/cases → 목록
+5. GET /api/cases?status=draft → 필터
+6. GET /api/vehicles?plate_number=존재 → 200
+7. GET /api/vehicles?plate_number=없음 → 404
+8. DELETE /api/cases/:id → 200 + DB 확인
+9. DELETE /api/cases/99999 → 404
+
+검증 통과 시 5e-a 전체 구현 완료 commit.
 
 ---
 
@@ -320,16 +332,16 @@ export type CreateCaseInput = { ... };
 - [ ] `npx tsc --noEmit` 0 errors
 - [ ] API_BASE_URL 개발용 IP 정확
 - [ ] 테스트: `api.auth.login("testuser", "testpass")` 호출 시도
-  - (counselor 계정 seed 있어야 함 → counselor drift 해결 필요 가능성!)
+  - (counselor 계정은 5e-a.2에서 seed됨 — 해당 sub-chunk 선행 완료 필수)
 
-### ⚠️ 잠재 블로커: Counselor Seed
+### 전제: Counselor Seed (5e-a.2에서 보장됨)
 
-`counselor drift` 이슈가 5e-c에서 드러날 수 있어요:
-- CLAUDE.md엔 `COUNSELOR_SEED_USERNAME` 있음
-- 코드엔 `seedCounselorUser` 없음
-- **5e-c 로그인 테스트 시점에 counselor 계정 없으면 진행 불가**
+모바일 로그인 테스트를 위해 counselor 계정 필요. 
+5e-a.2에서 `seedCounselorUser` 구현 + `prisma/seed.ts` 파이프라인 
+등록 완료. `.env`의 `COUNSELOR_SEED_USERNAME / PASSWORD`로 로그인 가능.
 
-**대응**: 5e-b 완료 후 5e-c 진입 전에 **counselor seed 작성**. 별도 chunk (5e-a.5)로 분리 가능.
+(이전 초안에서는 이것이 "조건부 chunk 5e-a.5"였으나, 2026-04-24 drift 
+실측에서 필수 항목으로 승격됨.)
 
 ### 커밋
 
@@ -344,57 +356,6 @@ HTTP client abstraction (lib/api.ts) for all screens to share:
 - 404 handling for vehicle lookup (returns null instead of throw)
 
 Preparation for Step 5e screen integration (5e-c onward).
-```
-
----
-
-## Chunk 5e-a.5: Counselor Seed (조건부)
-
-**소요**: 10분 (필요 시만)
-**조건**: 5e-b 완료 시점에 `counselorCreation` seed 없으면 추가
-
-### 작업
-
-`prisma/seeds/users.ts`에 `seedCounselorUser()` 함수 추가:
-
-```typescript
-export async function seedCounselorUser(prisma: PrismaClient) {
-  const username = process.env.COUNSELOR_SEED_USERNAME;
-  const password = process.env.COUNSELOR_SEED_PASSWORD;
-  if (!username || !password) return;
-  
-  // admin workshop 존재 확인
-  const adminWorkshop = await prisma.workshop.findFirst({
-    orderBy: { created_at: "asc" },
-  });
-  if (!adminWorkshop) return;
-  
-  const hashed = await bcrypt.hash(password, 10);
-  await prisma.user.upsert({
-    where: { username },
-    update: { password_hash: hashed },
-    create: {
-      username,
-      password_hash: hashed,
-      name: "테스트 상담자",
-      role: "counselor",
-      workshop_id: adminWorkshop.id,
-    },
-  });
-}
-```
-
-`prisma/seed.ts`에 호출 추가 (adminUser 다음).
-
-### 커밋
-
-```
-feat(api): add counselor user seed for development
-
-Resolves drift between CLAUDE.md (which documented COUNSELOR_SEED_*
-env vars) and code (which lacked seedCounselorUser implementation).
-
-Required for Step 5e mobile login integration testing.
 ```
 
 ---
@@ -697,7 +658,7 @@ Next: Week 3 진단 데이터 검증 (대표님 세션) 또는 Week 4 착수.
 각 chunk 완료 시 필수 STOP:
 
 - **5e-a 후**: 집중력 체크. 피곤하면 여기서 중단 (백엔드만으로도 의미 있는 마일스톤).
-- **5e-b 후**: counselor drift 확인. 없으면 5e-a.5 먼저.
+- **5e-b 후**: API 클라이언트 레이어 작동 확인 후 로그인 실 연결 진입.
 - **5e-c 후**: 로그인 실 작동 감동 🎉 나머지 2단계 진행 가능한지 판단.
 - **5e-e 후**: E2E 전체 검증 + 최종 commit.
 
@@ -711,14 +672,22 @@ Next: Week 3 진단 데이터 검증 (대표님 세션) 또는 Week 4 착수.
 ### 5e-b에서 API_BASE_URL 접속 안 됨
 → 맥의 방화벽? Expo와 같은 WiFi 확인. `curl` 맥 IP로 테스트.
 
-### 5e-c에서 counselor 계정 없음
-→ 5e-a.5 chunk 삽입 (10분), 그 후 진행.
+### 5e-c에서 counselor 로그인 실패
+→ 5e-a.2의 seed 실행 성공 여부 확인. 다음 순서로 디버깅:
+1. DB 확인: `SELECT * FROM users WHERE role='counselor';` (0 rows면 seed 미적용)
+2. `.env`의 `COUNSELOR_SEED_USERNAME/PASSWORD` 존재 확인
+3. 필요 시 `npm run db:seed` 재실행
+4. 해시 비교 실패라면 비밀번호 재설정 (seed 재실행으로 upsert됨)
 
 ### 5e-d에서 date 필드 파싱 이슈
 → Prisma가 반환하는 DateTime은 ISO string. 모바일에서 Date 객체로 변환 필요 시 처리.
 
 ### 5e-e에서 키보드/스크롤 버그 재발
 → 이미 Step 5d에서 해결된 패턴 재적용. 새 버그면 Phase 내에서 즉시 해결 (Step 5d 원칙).
+
+### Plan에 없는 drift 추가 발견 시
+→ STOP + 보고. Plan 업데이트 commit 먼저 한 뒤 진행. 
+이번 세션(2026-04-24)에서 7건 drift 발견 패턴.
 
 ---
 
@@ -730,6 +699,10 @@ Next: Week 3 진단 데이터 검증 (대표님 세션) 또는 Week 4 착수.
 - [ ] `grep -rn "MOCKUP" app/` 결과 0건 (또는 의도적으로 남은 것만)
 - [ ] 백엔드 `npm run build` 0 errors
 - [ ] 모바일 `npx tsc --noEmit` 0 errors
+- [ ] CLAUDE.md의 선반영 사항(Case.mileage, counselor auth) 실제 구현과 정합
+- [ ] schema.prisma에 Case.mileage, Case.memo 실존
+- [ ] seedCounselorUser가 prisma/seed.ts 파이프라인에 등록
+- [ ] `/api/auth/login`, `/api/auth/me` curl 테스트 통과
 
 ---
 
