@@ -72,6 +72,37 @@ npx prisma generate
   그래야 diff가 "직전 상태 → 새 schema" 차분만 출력
 - `prisma.config.ts`의 `datasource.url` env가 정상 로드되어야 함 (`.env`)
 
+## Non-Atomic Intermediate Commits (known)
+
+Schema migration 작업에서 chunk 분할 시, 중간 commits는
+**independently buildable 아님**을 유의. 이는 schema migration의 본질적
+제약 (type 호환성이 schema와 consumer code의 동시 변경을 요구)에서 기인.
+
+### 예시 (2026-04-24 M01 seed 작업)
+
+| commit | 단독 build | 이유 |
+|--------|-----------|------|
+| 2e04ff7 (docs) | ✅ | 코드 변경 없음 |
+| 4f2371a (schema) | ❌ | schema NEW + lib OLD 타입 불일치 |
+| 95689a1 (seed 신규) | ❌ | 동일 |
+| 9f0d884 (seed 수정) | ❌ | 동일 |
+| 6000f56 (API 레이어) | ✅ | schema+lib+routes 병합으로 해결 |
+| 85a2396 (docs) | ✅ | 코드 변경 없음 |
+
+### 운영 가이드
+
+- `git bisect` 시 **API 레이어 병합 commit 이후 범위로 제한**
+- `git revert` 시 schema 변경 commit 단독 revert는 빌드 불가
+- Feature 단위 rollback이 필요하면 병합 commit 기준으로 되돌리기
+
+### 대안 전략 (선택적)
+
+atomicity 100% 요구 시:
+- Schema + 모든 consumer code를 단일 commit으로 묶기
+- 단점: 큰 commit, 리뷰 어려움
+- 이번 작업은 chunk 히스토리 가치 우선으로 intermediate non-atomic
+  허용
+
 ## 이력
 
 - 2026-04-24: 최초 작성. multi-choice answers migration
